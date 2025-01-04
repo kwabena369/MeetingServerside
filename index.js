@@ -4,21 +4,14 @@ const cors = require('cors');
 
 const app = express();
 
-// Middleware to handle CORS preflight
-app.options('*', cors()) // Enable preflight for all routes
-
 // Apply middleware
 app.use(bodyParser.json());
-app.use((req, res, next) => {
-  // Set CORS headers
-  res.header('Access-Control-Allow-Origin', 'https://scheduling-platform.vercel.app');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  
-  // Pass to next layer of middleware
-  next();
-});
+app.use(cors({
+  origin: 'https://scheduling-platform.vercel.app', // Allow requests from this origin
+  methods: 'GET,POST,PUT,DELETE,OPTIONS',
+  allowedHeaders: 'Origin,X-Requested-With,Content-Type,Accept,Authorization',
+  credentials: true
+}));
 
 // Mock data for users
 let users = [
@@ -80,127 +73,22 @@ let meetings = [
 
 // Helper function to validate meeting time slots
 const isTimeSlotAvailable = (date, time, duration, participants) => {
-  // Check if the time slot conflicts with existing meetings
-  const conflictingMeeting = meetings.find(meeting => {
-    if (meeting.date === date) {
-      const meetingStart = new Date(`${date}T${meeting.time}`);
-      const meetingEnd = new Date(meetingStart.getTime() + meeting.duration * 60000);
-      const newStart = new Date(`${date}T${time}`);
-      const newEnd = new Date(newStart.getTime() + duration * 60000);
-
-      return (newStart < meetingEnd && newEnd > meetingStart);
-    }
-    return false;
-  });
-
-  return !conflictingMeeting;
+  // In a real application, you would check for conflicts here
+  return true;
 };
-
-// API Routes
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'healthy' });
-});
-
-// GET all meetings
-app.get('/meetings', (req, res) => {
-  res.json(meetings);
-});
-
-// GET a specific meeting
-app.get('/meetings/:meetingId', (req, res) => {
-  const { meetingId } = req.params;
-  const meeting = meetings.find(m => m.id === parseInt(meetingId));
-  
-  if (meeting) {
-    res.json(meeting);
-  } else {
-    res.status(404).json({ error: 'Meeting not found' });
-  }
-});
 
 // Create a new meeting
 app.post('/meetings', (req, res) => {
-  const { title, description, date, time, duration, participants } = req.body;
-
-  // Basic validation
-  if (!title || !date || !time || !duration || !participants) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-
-  // Check if time slot is available
-  if (!isTimeSlotAvailable(date, time, duration, participants)) {
-    return res.status(409).json({ error: 'Time slot is not available' });
-  }
-
-  const newMeeting = {
-    id: meetings.length + 1,
-    title,
-    description,
-    date,
-    time,
-    duration,
-    participants,
-    status: 'scheduled',
-    createdAt: new Date().toISOString()
-  };
-
-  meetings.push(newMeeting);
-  console.log('Meeting scheduled:', newMeeting);
-  res.status(201).json(newMeeting);
+  const meeting = { ...req.body, id: meetings.length + 1 };
+  meetings.push(meeting);
+  console.log('Meeting scheduled:', meeting);
+  res.status(201).json(meeting);
 });
 
-// Update a meeting
-app.put('/meetings/:meetingId', (req, res) => {
-  const { meetingId } = req.params;
-  const updatedDetails = req.body;
-  
-  if (!updatedDetails.date || !updatedDetails.time) {
-    return res.status(400).json({ error: 'Missing required fields for rescheduling' });
-  }
-
-  const meetingIndex = meetings.findIndex(m => m.id === parseInt(meetingId));
-  
-  if (meetingIndex === -1) {
-    return res.status(404).json({ error: 'Meeting not found' });
-  }
-
-  if (!isTimeSlotAvailable(updatedDetails.date, updatedDetails.time, updatedDetails.duration || meetings[meetingIndex].duration, meetings[meetingIndex].participants)) {
-    return res.status(409).json({ error: 'New time slot is not available' });
-  }
-
-  meetings[meetingIndex] = {
-    ...meetings[meetingIndex],
-    ...updatedDetails,
-    updatedAt: new Date().toISOString()
-  };
-
-  console.log('Meeting updated:', meetings[meetingIndex]);
-  res.json(meetings[meetingIndex]);
-});
-
-// Cancel a meeting
-app.delete('/meetings/:meetingId', (req, res) => {
-  const { meetingId } = req.params;
-  const meetingIndex = meetings.findIndex(m => m.id === parseInt(meetingId));
-  
-  if (meetingIndex === -1) {
-    return res.status(404).json({ error: 'Meeting not found' });
-  }
-
-  const canceledMeeting = meetings[meetingIndex];
-  meetings = meetings.filter((meeting) => meeting.id !== parseInt(meetingId));
-  
-  console.log('Meeting canceled:', meetingId);
-  res.status(200).json({ message: 'Meeting canceled successfully', meeting: canceledMeeting });
-});
-
-// GET user's available slots
+// Fetch available time slots for a user
 app.get('/users/:userId/available-slots', (req, res) => {
   const { userId } = req.params;
-  const user = users.find(u => u.userId === parseInt(userId));
-  
+  const user = users.find((u) => u.userId === parseInt(userId));
   if (user) {
     res.json(user.availableSlots);
   } else {
@@ -208,17 +96,43 @@ app.get('/users/:userId/available-slots', (req, res) => {
   }
 });
 
-// GET user details
-app.get('/users/:userId', (req, res) => {
-  const { userId } = req.params;
-  const user = users.find(u => u.userId === parseInt(userId));
-  
-  if (user) {
-    const { password, ...safeUserData } = user;
-    res.json(safeUserData);
-  } else {
-    res.status(404).json({ error: 'User not found' });
+// Fetch all meetings
+app.get('/meetings', (req, res) => {
+  res.json(meetings);
+});
+
+// Update an existing meeting (reschedule)
+app.put('/meetings/:meetingId', (req, res) => {
+  const { meetingId } = req.params;
+  const updatedDetails = req.body;
+
+  // Basic validation
+  if (!updatedDetails.date || !updatedDetails.time) {
+    return res.status(400).json({ error: 'Missing required fields for rescheduling' });
   }
+
+  const meetingIndex = meetings.findIndex((meeting) => meeting.id === parseInt(meetingId));
+  if (meetingIndex === -1) {
+    return res.status(404).json({ error: 'Meeting not found' });
+  }
+
+  // Update the meeting details
+  meetings[meetingIndex] = { ...meetings[meetingIndex], ...updatedDetails };
+  console.log('Meeting rescheduled:', meetings[meetingIndex]);
+  res.json(meetings[meetingIndex]);
+});
+
+// Cancel a meeting
+app.delete('/meetings/:meetingId', (req, res) => {
+  const { meetingId } = req.params;
+  meetings = meetings.filter((meeting) => meeting.id !== parseInt(meetingId));
+  console.log('Meeting canceled:', meetingId);
+  res.status(204).end();
+});
+
+// Test endpoint
+app.get('/test', (req, res) => {
+  res.send('<h1>Testing</h1><p>The backend is working correctly.</p>');
 });
 
 // Error handling middleware
