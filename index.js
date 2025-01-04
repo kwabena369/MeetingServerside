@@ -3,22 +3,22 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 
 const app = express();
+
+// Middleware to handle CORS preflight
+app.options('*', cors()) // Enable preflight for all routes
+
+// Apply middleware
 app.use(bodyParser.json());
-
-// CORS configuration
-const corsOptions = {
-  origin: [
-    'https://scheduling-platform.vercel.app',  // Production frontend
-    'http://localhost:5173',                   // Development frontend
-    'http://localhost:3000'                    // Alternative local development port
-  ],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-  optionsSuccessStatus: 200
-};
-
-app.use(cors(corsOptions));
+app.use((req, res, next) => {
+  // Set CORS headers
+  res.header('Access-Control-Allow-Origin', 'https://scheduling-platform.vercel.app');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  // Pass to next layer of middleware
+  next();
+});
 
 // Mock data for users
 let users = [
@@ -231,7 +231,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  console.log('Allowed origins:', corsOptions.origin);
+  console.log('CORS configured for: https://scheduling-platform.vercel.app');
 });
 
 module.exports = app;
