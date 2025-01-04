@@ -4,9 +4,23 @@ const cors = require('cors');
 
 const app = express();
 app.use(bodyParser.json());
-app.use(cors());
 
-// Mock data for users and their available slots
+// CORS configuration
+const corsOptions = {
+  origin: [
+    'https://scheduling-platform.vercel.app',  // Production frontend
+    'http://localhost:5173',                   // Development frontend
+    'http://localhost:3000'                    // Alternative local development port
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+
+// Mock data for users
 let users = [
   {
     userId: 1,
@@ -34,11 +48,11 @@ let users = [
   },
 ];
 
-// Mock data for initial meetings
+// Mock data for meetings
 let meetings = [
   {
     id: 1,
-    title: "Initial Project Discussion",
+    title: "Project Discussion",
     description: "Discuss project requirements and timeline",
     date: "2025-01-03",
     time: "10:00",
@@ -66,9 +80,28 @@ let meetings = [
 
 // Helper function to validate meeting time slots
 const isTimeSlotAvailable = (date, time, duration, participants) => {
-  // In a real application, you would check for conflicts here
-  return true;
+  // Check if the time slot conflicts with existing meetings
+  const conflictingMeeting = meetings.find(meeting => {
+    if (meeting.date === date) {
+      const meetingStart = new Date(`${date}T${meeting.time}`);
+      const meetingEnd = new Date(meetingStart.getTime() + meeting.duration * 60000);
+      const newStart = new Date(`${date}T${time}`);
+      const newEnd = new Date(newStart.getTime() + duration * 60000);
+
+      return (newStart < meetingEnd && newEnd > meetingStart);
+    }
+    return false;
+  });
+
+  return !conflictingMeeting;
 };
+
+// API Routes
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'healthy' });
+});
 
 // GET all meetings
 app.get('/meetings', (req, res) => {
@@ -118,38 +151,11 @@ app.post('/meetings', (req, res) => {
   res.status(201).json(newMeeting);
 });
 
-// Fetch available time slots for a user
-app.get('/users/:userId/available-slots', (req, res) => {
-  const { userId } = req.params;
-  const user = users.find((u) => u.userId === parseInt(userId));
-  
-  if (user) {
-    res.json(user.availableSlots);
-  } else {
-    res.status(404).json({ error: 'User not found' });
-  }
-});
-
-// Get user details
-app.get('/users/:userId', (req, res) => {
-  const { userId } = req.params;
-  const user = users.find((u) => u.userId === parseInt(userId));
-  
-  if (user) {
-    // Don't send sensitive information
-    const { password, ...safeUserData } = user;
-    res.json(safeUserData);
-  } else {
-    res.status(404).json({ error: 'User not found' });
-  }
-});
-
-// Update an existing meeting (reschedule)
+// Update a meeting
 app.put('/meetings/:meetingId', (req, res) => {
   const { meetingId } = req.params;
   const updatedDetails = req.body;
   
-  // Basic validation
   if (!updatedDetails.date || !updatedDetails.time) {
     return res.status(400).json({ error: 'Missing required fields for rescheduling' });
   }
@@ -160,8 +166,7 @@ app.put('/meetings/:meetingId', (req, res) => {
     return res.status(404).json({ error: 'Meeting not found' });
   }
 
-  // Check if new time slot is available
-  if (!isTimeSlotAvailable(updatedDetails.date, updatedDetails.time, updatedDetails.duration, meetings[meetingIndex].participants)) {
+  if (!isTimeSlotAvailable(updatedDetails.date, updatedDetails.time, updatedDetails.duration || meetings[meetingIndex].duration, meetings[meetingIndex].participants)) {
     return res.status(409).json({ error: 'New time slot is not available' });
   }
 
@@ -171,7 +176,7 @@ app.put('/meetings/:meetingId', (req, res) => {
     updatedAt: new Date().toISOString()
   };
 
-  console.log('Meeting rescheduled:', meetings[meetingIndex]);
+  console.log('Meeting updated:', meetings[meetingIndex]);
   res.json(meetings[meetingIndex]);
 });
 
@@ -191,13 +196,42 @@ app.delete('/meetings/:meetingId', (req, res) => {
   res.status(200).json({ message: 'Meeting canceled successfully', meeting: canceledMeeting });
 });
 
+// GET user's available slots
+app.get('/users/:userId/available-slots', (req, res) => {
+  const { userId } = req.params;
+  const user = users.find(u => u.userId === parseInt(userId));
+  
+  if (user) {
+    res.json(user.availableSlots);
+  } else {
+    res.status(404).json({ error: 'User not found' });
+  }
+});
+
+// GET user details
+app.get('/users/:userId', (req, res) => {
+  const { userId } = req.params;
+  const user = users.find(u => u.userId === parseInt(userId));
+  
+  if (user) {
+    const { password, ...safeUserData } = user;
+    res.json(safeUserData);
+  } else {
+    res.status(404).json({ error: 'User not found' });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('Error:', err.stack);
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
+// Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  console.log('Allowed origins:', corsOptions.origin);
 });
+
+module.exports = app;
